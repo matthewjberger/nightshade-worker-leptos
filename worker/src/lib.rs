@@ -126,8 +126,9 @@ impl CubeGame {
 
 impl State for CubeGame {
     fn initialize(&mut self, world: &mut World) {
-        world.resources.render_settings.atmosphere = Atmosphere::Sky;
+        world.resources.render_settings.atmosphere = Atmosphere::CloudySky;
         world.resources.render_settings.clear_color = [0.17, 0.17, 0.18, 1.0];
+        capture_procedural_atmosphere_ibl(world, Atmosphere::CloudySky, 0.0);
         spawn_sun(world);
 
         let camera = spawn_pan_orbit_camera(
