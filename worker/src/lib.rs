@@ -1,21 +1,19 @@
+mod ecs;
+mod state;
+mod systems;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use nightshade::prelude::*;
 use nightshade::render::wgpu::create_wgpu_renderer;
-use protocol::{AdapterInfo, ClientMessage, PickResult, Stats, WorkerMessage};
+use protocol::{AdapterInfo, ClientMessage, Stats, WorkerMessage};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent, OffscreenCanvas};
 
-const ORBIT_SENSITIVITY: f32 = 0.005;
-const ZOOM_SENSITIVITY: f32 = 0.01;
-const PITCH_LIMIT: f32 = 1.5;
-const MIN_RADIUS: f32 = 1.5;
-const MAX_RADIUS: f32 = 20.0;
-
-const HELMET_GLB: &[u8] = include_bytes!("../assets/DamagedHelmet.glb");
+use crate::state::Showcase;
 
 type AppSlot = Rc<RefCell<Option<App>>>;
 type FrameLoop = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
@@ -23,7 +21,7 @@ type FrameLoop = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 struct App {
     world: World,
     renderer: WgpuRenderer,
-    game: CubeGame,
+    showcase: Showcase,
     frames: f64,
 }
 
@@ -33,277 +31,6 @@ impl App {
             frames: self.frames,
             fps: self.world.resources.window.timing.frames_per_second,
         }
-    }
-}
-
-struct CubeGame {
-    cube: Option<Entity>,
-    marker: Option<Entity>,
-    helmet: Option<Entity>,
-    helmet_meshes: Vec<Entity>,
-    helmet_base_rotation: Option<nalgebra_glm::Quat>,
-    show_helmet: bool,
-    camera: Option<Entity>,
-    spin: f32,
-    speed: f32,
-    pending_yaw: f32,
-    pending_pitch: f32,
-    pending_zoom: f32,
-    pick_pending: bool,
-    pick_message: Option<Option<PickResult>>,
-}
-
-impl CubeGame {
-    fn new() -> Self {
-        Self {
-            cube: None,
-            marker: None,
-            helmet: None,
-            helmet_meshes: Vec::new(),
-            helmet_base_rotation: None,
-            show_helmet: false,
-            camera: None,
-            spin: 0.0,
-            speed: 1.0,
-            pending_yaw: 0.0,
-            pending_pitch: 0.0,
-            pending_zoom: 0.0,
-            pick_pending: false,
-            pick_message: None,
-        }
-    }
-
-    fn apply_pick(&mut self, world: &mut World) {
-        if !self.pick_pending {
-            return;
-        }
-        let Some(result) = world.resources.gpu_picking.take_result() else {
-            return;
-        };
-        self.pick_pending = false;
-
-        if result.depth <= 0.0 {
-            self.pick_message = Some(None);
-            return;
-        }
-
-        let hit = result.world_position;
-        let root = if self.show_helmet {
-            self.helmet
-        } else {
-            self.cube
-        };
-        if let (Some(marker), Some(root)) = (self.marker, root) {
-            let local = world
-                .core
-                .get_global_transform(root)
-                .and_then(|global| global.0.try_inverse())
-                .map(|inverse| {
-                    let point = inverse * nalgebra_glm::vec4(hit.x, hit.y, hit.z, 1.0);
-                    Vec3::new(point.x / point.w, point.y / point.w, point.z / point.w)
-                })
-                .unwrap_or(hit);
-            if let Some(transform) = world.core.get_local_transform_mut(marker) {
-                transform.translation = local;
-            }
-            mark_local_transform_dirty(world, marker);
-        }
-
-        let name = if self.show_helmet { "Helmet" } else { "Cube" };
-        self.pick_message = Some(Some(PickResult {
-            name: name.to_string(),
-            x: hit.x,
-            y: hit.y,
-            z: hit.z,
-        }));
-    }
-
-    fn set_helmet_visible(&mut self, world: &mut World, enabled: bool) {
-        if enabled && self.helmet.is_none() {
-            self.load_helmet(world);
-        }
-        self.show_helmet = enabled;
-
-        if let Some(cube) = self.cube {
-            world
-                .core
-                .set_visibility(cube, Visibility { visible: !enabled });
-        }
-        for &entity in &self.helmet_meshes {
-            world
-                .core
-                .set_visibility(entity, Visibility { visible: enabled });
-        }
-
-        let root = if enabled { self.helmet } else { self.cube };
-        if let (Some(marker), Some(root)) = (self.marker, root) {
-            update_parent(world, marker, Some(Parent(Some(root))));
-            if let Some(transform) = world.core.get_local_transform_mut(marker) {
-                transform.translation = Vec3::new(0.0, 0.0, 0.0);
-            }
-            mark_local_transform_dirty(world, marker);
-        }
-    }
-
-    fn load_helmet(&mut self, world: &mut World) {
-        let mut result = match import_gltf_from_bytes(HELMET_GLB) {
-            Ok(result) => result,
-            Err(error) => {
-                tracing::error!("failed to import helmet: {error}");
-                return;
-            }
-        };
-        nightshade::ecs::loading::queue_gltf_load(world, &mut result);
-
-        let Some(prefab) = result.prefabs.first() else {
-            return;
-        };
-        let root = nightshade::ecs::prefab::spawn_prefab(world, prefab, Vec3::new(0.0, 0.0, 0.0));
-        self.helmet_base_rotation = world
-            .core
-            .get_local_transform(root)
-            .map(|transform| transform.rotation);
-
-        let mut entities = nightshade::ecs::transform::queries::query_descendants(world, root);
-        entities.push(root);
-        for &entity in &entities {
-            world.core.add_components(entity, VISIBILITY);
-            world
-                .core
-                .set_visibility(entity, Visibility { visible: false });
-        }
-        self.helmet = Some(root);
-        self.helmet_meshes = entities;
-    }
-}
-
-impl State for CubeGame {
-    fn initialize(&mut self, world: &mut World) {
-        world.resources.render_settings.atmosphere = Atmosphere::CloudySky;
-        world.resources.render_settings.clear_color = [0.17, 0.17, 0.18, 1.0];
-        capture_procedural_atmosphere_ibl(world, Atmosphere::CloudySky, 0.0);
-        spawn_sun(world);
-
-        let camera = spawn_pan_orbit_camera(
-            world,
-            Vec3::new(0.0, 0.0, 0.0),
-            3.0,
-            0.0,
-            0.0,
-            "Camera".to_string(),
-        );
-        world.resources.active_camera = Some(camera);
-        self.camera = Some(camera);
-
-        material_registry_insert(
-            &mut world.resources.assets.material_registry,
-            "cube".to_string(),
-            Material {
-                base_color: [0.3, 0.5, 0.9, 1.0],
-                roughness: 0.5,
-                metallic: 0.0,
-                ..Default::default()
-            },
-        );
-        if let Some(&index) = world
-            .resources
-            .assets
-            .material_registry
-            .registry
-            .name_to_index
-            .get("cube")
-        {
-            registry_add_reference(
-                &mut world.resources.assets.material_registry.registry,
-                index,
-            );
-        }
-
-        let cube = spawn_mesh(
-            world,
-            "Cube",
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(1.0, 1.0, 1.0),
-        );
-        world.core.set_material_ref(cube, MaterialRef::new("cube"));
-        world.core.add_components(cube, VISIBILITY);
-        self.cube = Some(cube);
-
-        let marker = spawn_mesh(
-            world,
-            "Sphere",
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(0.07, 0.07, 0.07),
-        );
-        world.core.add_components(marker, PARENT);
-        material_registry_insert(
-            &mut world.resources.assets.material_registry,
-            "marker".to_string(),
-            Material {
-                base_color: [1.0, 0.45, 0.1, 1.0],
-                emissive_factor: [1.0, 0.45, 0.1],
-                emissive_strength: 1.5,
-                ..Default::default()
-            },
-        );
-        if let Some(&index) = world
-            .resources
-            .assets
-            .material_registry
-            .registry
-            .name_to_index
-            .get("marker")
-        {
-            registry_add_reference(
-                &mut world.resources.assets.material_registry.registry,
-                index,
-            );
-        }
-        world
-            .core
-            .set_material_ref(marker, MaterialRef::new("marker"));
-        update_parent(world, marker, Some(Parent(Some(cube))));
-        world.core.add_components(marker, VISIBILITY);
-        self.marker = Some(marker);
-    }
-
-    fn run_systems(&mut self, world: &mut World) {
-        let delta_time = world.resources.window.timing.delta_time;
-        self.spin += self.speed * delta_time;
-
-        if self.show_helmet {
-            if let (Some(helmet), Some(base)) = (self.helmet, self.helmet_base_rotation) {
-                if let Some(transform) = world.core.get_local_transform_mut(helmet) {
-                    transform.rotation =
-                        nalgebra_glm::quat_angle_axis(self.spin, &Vec3::new(0.0, 1.0, 0.0)) * base;
-                }
-                mark_local_transform_dirty(world, helmet);
-            }
-        } else if let Some(cube) = self.cube {
-            if let Some(transform) = world.core.get_local_transform_mut(cube) {
-                transform.rotation =
-                    nalgebra_glm::quat_angle_axis(self.spin, &Vec3::new(0.0, 1.0, 0.0))
-                        * nalgebra_glm::quat_angle_axis(self.spin * 0.4, &Vec3::new(1.0, 0.0, 0.0));
-            }
-            mark_local_transform_dirty(world, cube);
-        }
-
-        if let Some(camera) = self.camera
-            && let Some(orbit) = world.core.get_pan_orbit_camera_mut(camera)
-        {
-            orbit.target_yaw -= self.pending_yaw * ORBIT_SENSITIVITY;
-            orbit.target_pitch = (orbit.target_pitch + self.pending_pitch * ORBIT_SENSITIVITY)
-                .clamp(-PITCH_LIMIT, PITCH_LIMIT);
-            orbit.target_radius = (orbit.target_radius + self.pending_zoom * ZOOM_SENSITIVITY)
-                .clamp(MIN_RADIUS, MAX_RADIUS);
-        }
-        self.pending_yaw = 0.0;
-        self.pending_pitch = 0.0;
-        self.pending_zoom = 0.0;
-
-        pan_orbit_camera_system(world);
-
-        self.apply_pick(world);
     }
 }
 
@@ -366,49 +93,42 @@ fn handle_message(scope: &DedicatedWorkerGlobalScope, app_slot: &AppSlot, event:
         }
         ClientMessage::SetSpeed { speed } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                app.game.speed = speed;
+                systems::controls::set_speed(&mut app.showcase.showcase_world, speed);
             }
         }
         ClientMessage::SetColor { red, green, blue } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                queue_ecs_command(
-                    &mut app.world,
-                    EcsCommand::ReloadMaterial {
-                        name: "cube".to_string(),
-                        material: Box::new(Material {
-                            base_color: [red, green, blue, 1.0],
-                            roughness: 0.5,
-                            metallic: 0.0,
-                            ..Default::default()
-                        }),
-                    },
-                );
+                systems::controls::set_color(&mut app.world, red, green, blue);
             }
         }
         ClientMessage::Orbit { yaw, pitch } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                app.game.pending_yaw += yaw;
-                app.game.pending_pitch += pitch;
+                let input = &mut app.showcase.showcase_world.resources.camera_input;
+                input.pending_yaw += yaw;
+                input.pending_pitch += pitch;
             }
         }
         ClientMessage::Zoom { amount } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                app.game.pending_zoom += amount;
+                app.showcase
+                    .showcase_world
+                    .resources
+                    .camera_input
+                    .pending_zoom += amount;
             }
         }
         ClientMessage::Pick { x, y } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                app.world.resources.gpu_picking = GpuPicking::default();
-                app.world
-                    .resources
-                    .gpu_picking
-                    .request_pick(x.max(0.0) as u32, y.max(0.0) as u32);
-                app.game.pick_pending = true;
+                systems::picking::request(&mut app.showcase.showcase_world, &mut app.world, x, y);
             }
         }
         ClientMessage::SetHelmet { enabled } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                app.game.set_helmet_visible(&mut app.world, enabled);
+                systems::controls::set_helmet(
+                    &mut app.showcase.showcase_world,
+                    &mut app.world,
+                    enabled,
+                );
             }
         }
         ClientMessage::StatsRequest { id } => {
@@ -435,10 +155,10 @@ async fn create_app(canvas: OffscreenCanvas, width: f32, height: f32) -> App {
         .expect("failed to create renderer from offscreen canvas");
 
     let mut world = World::default();
-    let mut game = CubeGame::new();
+    let mut showcase = Showcase::default();
     initialize_offscreen(
         &mut world,
-        &mut game,
+        &mut showcase,
         &mut renderer,
         (physical_width, physical_height),
         1.0,
@@ -447,7 +167,7 @@ async fn create_app(canvas: OffscreenCanvas, width: f32, height: f32) -> App {
     App {
         world,
         renderer,
-        game,
+        showcase,
         frames: 0.0,
     }
 }
@@ -460,9 +180,9 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
 
     *frame.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         if let Some(app) = app_slot.borrow_mut().as_mut() {
-            tick_offscreen(&mut app.world, &mut app.game, &mut app.renderer);
+            tick_offscreen(&mut app.world, &mut app.showcase, &mut app.renderer);
             app.frames += 1.0;
-            if let Some(payload) = app.game.pick_message.take() {
+            if let Some(payload) = app.showcase.showcase_world.resources.picking.message.take() {
                 post(&loop_scope, &WorkerMessage::Picked { hit: payload });
             }
             if let Some(performance) = loop_scope.performance() {
