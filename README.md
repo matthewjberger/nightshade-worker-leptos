@@ -2,7 +2,7 @@
 
 The [Nightshade](https://github.com/matthewjberger/nightshade) engine running inside a web worker via WebAssembly, with a [Leptos](https://leptos.dev) frontend. No graphics code on the main thread: the worker owns an `OffscreenCanvas`, drives the render loop with `requestAnimationFrame`, and renders the whole engine through WebGPU. The Leptos app on the main thread only transfers the canvas and forwards events.
 
-Live demo: https://matthewjberger.github.io/nightshade-worker-leptos/
+Live demo: https://matthewberger.dev/nightshade-worker-leptos/
 
 This is the engine-in-the-worker variant of [webgpu-worker-leptos](https://github.com/matthewjberger/webgpu-worker-leptos). That project hand-writes a small wgpu renderer in the worker. This one runs all of Nightshade instead, the same way [bevy-worker-leptos](https://github.com/matthewjberger/bevy-worker-leptos) runs Bevy. The page and the worker exchange messages defined once in a shared `protocol` crate, serialized over `postMessage`.
 
