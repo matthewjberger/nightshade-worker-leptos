@@ -114,7 +114,7 @@ impl State for CubeGame {
             world,
             "Sphere",
             Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(0.3, 0.3, 0.3),
+            Vec3::new(0.07, 0.07, 0.07),
         );
         world.core.add_components(marker, PARENT);
         material_registry_insert(
@@ -123,8 +123,7 @@ impl State for CubeGame {
             Material {
                 base_color: [1.0, 0.45, 0.1, 1.0],
                 emissive_factor: [1.0, 0.45, 0.1],
-                emissive_strength: 6.0,
-                unlit: true,
+                emissive_strength: 1.5,
                 ..Default::default()
             },
         );
