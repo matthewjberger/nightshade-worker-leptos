@@ -36,6 +36,7 @@ impl App {
 
 struct CubeGame {
     cube: Option<Entity>,
+    marker: Option<Entity>,
     camera: Option<Entity>,
     spin: f32,
     speed: f32,
@@ -48,6 +49,7 @@ impl CubeGame {
     fn new() -> Self {
         Self {
             cube: None,
+            marker: None,
             camera: None,
             spin: 0.0,
             speed: 1.0,
@@ -107,6 +109,43 @@ impl State for CubeGame {
         );
         world.core.set_material_ref(cube, MaterialRef::new("cube"));
         self.cube = Some(cube);
+
+        let marker = spawn_mesh(
+            world,
+            "Sphere",
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.3, 0.3, 0.3),
+        );
+        world.core.add_components(marker, PARENT);
+        material_registry_insert(
+            &mut world.resources.assets.material_registry,
+            "marker".to_string(),
+            Material {
+                base_color: [1.0, 0.45, 0.1, 1.0],
+                emissive_factor: [1.0, 0.45, 0.1],
+                emissive_strength: 6.0,
+                unlit: true,
+                ..Default::default()
+            },
+        );
+        if let Some(&index) = world
+            .resources
+            .assets
+            .material_registry
+            .registry
+            .name_to_index
+            .get("marker")
+        {
+            registry_add_reference(
+                &mut world.resources.assets.material_registry.registry,
+                index,
+            );
+        }
+        world
+            .core
+            .set_material_ref(marker, MaterialRef::new("marker"));
+        update_parent(world, marker, Some(Parent(Some(cube))));
+        self.marker = Some(marker);
     }
 
     fn run_systems(&mut self, world: &mut World) {
@@ -125,7 +164,7 @@ impl State for CubeGame {
         if let Some(camera) = self.camera
             && let Some(orbit) = world.core.get_pan_orbit_camera_mut(camera)
         {
-            orbit.target_yaw += self.pending_yaw * ORBIT_SENSITIVITY;
+            orbit.target_yaw -= self.pending_yaw * ORBIT_SENSITIVITY;
             orbit.target_pitch = (orbit.target_pitch + self.pending_pitch * ORBIT_SENSITIVITY)
                 .clamp(-PITCH_LIMIT, PITCH_LIMIT);
             orbit.target_radius = (orbit.target_radius + self.pending_zoom * ZOOM_SENSITIVITY)
@@ -232,7 +271,7 @@ fn handle_message(scope: &DedicatedWorkerGlobalScope, app_slot: &AppSlot, event:
             let hit = app_slot
                 .borrow_mut()
                 .as_mut()
-                .and_then(|app| pick(&app.world, x, y));
+                .and_then(|app| pick(app, x, y));
             post(scope, &WorkerMessage::Picked { hit });
         }
         ClientMessage::StatsRequest { id } => {
@@ -305,18 +344,40 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
     }
 }
 
-fn pick(world: &World, x: f32, y: f32) -> Option<PickResult> {
-    let result = pick_closest_entity(world, Vec2::new(x, y))?;
-    let name = world
+fn pick(app: &mut App, x: f32, y: f32) -> Option<PickResult> {
+    let cube = app.game.cube?;
+    let results = pick_entities(&app.world, Vec2::new(x, y), PickingOptions::default());
+    let result = results.into_iter().find(|hit| hit.entity == cube)?;
+    let hit = result.world_position;
+
+    if let Some(marker) = app.game.marker {
+        let local = app
+            .world
+            .core
+            .get_global_transform(cube)
+            .and_then(|global| global.0.try_inverse())
+            .map(|inverse| {
+                let point = inverse * nalgebra_glm::vec4(hit.x, hit.y, hit.z, 1.0);
+                Vec3::new(point.x / point.w, point.y / point.w, point.z / point.w)
+            })
+            .unwrap_or(hit);
+        if let Some(transform) = app.world.core.get_local_transform_mut(marker) {
+            transform.translation = local;
+        }
+        mark_local_transform_dirty(&mut app.world, marker);
+    }
+
+    let name = app
+        .world
         .core
-        .get_name(result.entity)
+        .get_name(cube)
         .map(|name| name.0.clone())
         .unwrap_or_else(|| "entity".to_string());
     Some(PickResult {
         name,
-        x: result.world_position.x,
-        y: result.world_position.y,
-        z: result.world_position.z,
+        x: hit.x,
+        y: hit.y,
+        z: hit.z,
     })
 }
 
