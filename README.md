@@ -22,8 +22,6 @@ The worker wasm and the page wasm are two separate modules built by two toolchai
 
 ## Quickstart
 
-The worker depends on the published [`nightshade`](https://crates.io/crates/nightshade) crate, so there is nothing to clone alongside it.
-
 Tooling is pinned in [`mise.toml`](mise.toml). Install [mise](https://mise.jdx.dev) and [just](https://github.com/casey/just), then:
 
 ```bash
@@ -34,10 +32,6 @@ just run         # build the worker, the stylesheet, and serve at http://127.0.0
 Because the worker compiles the full engine, the first build is large and the worker wasm is multiple megabytes even after `wasm-opt -Oz`. That size is the tradeoff for running a complete engine off the main thread instead of a single shader.
 
 Needs a browser with WebGPU and `OffscreenCanvas`-in-workers support (Chromium 113+, Firefox 141+).
-
-## Deployment
-
-Pushing to `main` builds the worker and the Leptos bundle and publishes `dist/` to GitHub Pages through [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The page is served under the repository path, so the Trunk build sets `--public-url /nightshade-worker-leptos/`.
 
 ## Credits
 

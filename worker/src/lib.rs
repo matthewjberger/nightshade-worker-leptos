@@ -17,7 +17,6 @@ use crate::ecs::PickOutcome;
 use crate::state::Showcase;
 
 type AppSlot = Rc<RefCell<Option<App>>>;
-type FrameLoop = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
 struct App {
     world: World,
@@ -168,12 +167,9 @@ async fn create_app(canvas: OffscreenCanvas, width: f32, height: f32) -> App {
 }
 
 fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
-    let frame: FrameLoop = Rc::new(RefCell::new(None));
-    let frame_handle = frame.clone();
-    let loop_scope = scope.clone();
     let last_push = Rc::new(RefCell::new(0.0_f64));
 
-    *frame.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
+    spawn_animation_frame_loop(move || {
         if let Some(app) = app_slot.borrow_mut().as_mut() {
             tick_offscreen(&mut app.world, &mut app.showcase, &mut app.renderer);
             app.frames += 1.0;
@@ -182,25 +178,18 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
                     PickOutcome::Hit(result) => Some(result),
                     PickOutcome::Miss => None,
                 };
-                post(&loop_scope, &WorkerMessage::Picked { hit });
+                post(&scope, &WorkerMessage::Picked { hit });
             }
-            if let Some(performance) = loop_scope.performance() {
+            if let Some(performance) = scope.performance() {
                 let now = performance.now();
                 let mut last = last_push.borrow_mut();
                 if now - *last > 250.0 {
                     *last = now;
-                    post(&loop_scope, &WorkerMessage::Stats { stats: app.stats() });
+                    post(&scope, &WorkerMessage::Stats { stats: app.stats() });
                 }
             }
         }
-        if let Some(callback) = frame_handle.borrow().as_ref() {
-            let _ = loop_scope.request_animation_frame(callback.as_ref().unchecked_ref());
-        }
-    }));
-
-    if let Some(callback) = frame.borrow().as_ref() {
-        let _ = scope.request_animation_frame(callback.as_ref().unchecked_ref());
-    }
+    });
 }
 
 fn canvas_from(data: &JsValue) -> Option<OffscreenCanvas> {
