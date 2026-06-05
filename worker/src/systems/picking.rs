@@ -1,4 +1,5 @@
-use crate::ecs::{ShowcaseWorld, active_subject_engine, marker_engine};
+use crate::ecs::{PickOutcome, ShowcaseWorld};
+use crate::systems::query::{active_subject_engine, marker_engine};
 use nightshade::prelude::*;
 use protocol::PickResult;
 
@@ -26,7 +27,7 @@ pub fn apply(showcase_world: &mut ShowcaseWorld, world: &mut World) {
     showcase_world.resources.picking.pending = false;
 
     if result.depth <= 0.0 {
-        showcase_world.resources.picking.message = Some(None);
+        showcase_world.resources.picking.result = Some(PickOutcome::Miss);
         return;
     }
 
@@ -51,7 +52,7 @@ pub fn apply(showcase_world: &mut ShowcaseWorld, world: &mut World) {
     }
 
     let name = if show_helmet { "Helmet" } else { "Cube" };
-    showcase_world.resources.picking.message = Some(Some(PickResult {
+    showcase_world.resources.picking.result = Some(PickOutcome::Hit(PickResult {
         name: name.to_string(),
         x: hit.x,
         y: hit.y,

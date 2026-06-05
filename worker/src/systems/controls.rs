@@ -1,6 +1,5 @@
-use crate::ecs::{
-    ENGINE_ENTITY, SUBJECT, ShowcaseWorld, Subject, SubjectKind, marker_engine, subject_engine,
-};
+use crate::ecs::{ENGINE_ENTITY, SUBJECT, ShowcaseWorld, Subject, SubjectKind};
+use crate::systems::query::{marker_engine, subject_engine};
 use nightshade::prelude::*;
 
 const HELMET_GLB: &[u8] = include_bytes!("../../assets/DamagedHelmet.glb");

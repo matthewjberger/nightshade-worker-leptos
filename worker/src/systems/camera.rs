@@ -7,6 +7,17 @@ const PITCH_LIMIT: f32 = 1.5;
 const MIN_RADIUS: f32 = 1.5;
 const MAX_RADIUS: f32 = 20.0;
 
+/// Accumulates a forwarded orbit delta for the next frame.
+pub fn queue_orbit(showcase_world: &mut ShowcaseWorld, yaw: f32, pitch: f32) {
+    showcase_world.resources.camera_input.pending_yaw += yaw;
+    showcase_world.resources.camera_input.pending_pitch += pitch;
+}
+
+/// Accumulates a forwarded zoom delta for the next frame.
+pub fn queue_zoom(showcase_world: &mut ShowcaseWorld, amount: f32) {
+    showcase_world.resources.camera_input.pending_zoom += amount;
+}
+
 /// Applies the forwarded orbit and zoom deltas to the pan-orbit camera, then
 /// runs the engine's pan-orbit controller.
 pub fn orbit(showcase_world: &mut ShowcaseWorld, world: &mut World) {

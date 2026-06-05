@@ -13,6 +13,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent, OffscreenCanvas};
 
+use crate::ecs::PickOutcome;
 use crate::state::Showcase;
 
 type AppSlot = Rc<RefCell<Option<App>>>;
@@ -103,18 +104,12 @@ fn handle_message(scope: &DedicatedWorkerGlobalScope, app_slot: &AppSlot, event:
         }
         ClientMessage::Orbit { yaw, pitch } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                let input = &mut app.showcase.showcase_world.resources.camera_input;
-                input.pending_yaw += yaw;
-                input.pending_pitch += pitch;
+                systems::camera::queue_orbit(&mut app.showcase.showcase_world, yaw, pitch);
             }
         }
         ClientMessage::Zoom { amount } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
-                app.showcase
-                    .showcase_world
-                    .resources
-                    .camera_input
-                    .pending_zoom += amount;
+                systems::camera::queue_zoom(&mut app.showcase.showcase_world, amount);
             }
         }
         ClientMessage::Pick { x, y } => {
@@ -182,8 +177,12 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
         if let Some(app) = app_slot.borrow_mut().as_mut() {
             tick_offscreen(&mut app.world, &mut app.showcase, &mut app.renderer);
             app.frames += 1.0;
-            if let Some(payload) = app.showcase.showcase_world.resources.picking.message.take() {
-                post(&loop_scope, &WorkerMessage::Picked { hit: payload });
+            if let Some(outcome) = app.showcase.showcase_world.resources.picking.result.take() {
+                let hit = match outcome {
+                    PickOutcome::Hit(result) => Some(result),
+                    PickOutcome::Miss => None,
+                };
+                post(&loop_scope, &WorkerMessage::Picked { hit });
             }
             if let Some(performance) = loop_scope.performance() {
                 let now = performance.now();

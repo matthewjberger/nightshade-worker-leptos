@@ -1,4 +1,5 @@
-use crate::ecs::{ShowcaseWorld, active_subject_engine};
+use crate::ecs::ShowcaseWorld;
+use crate::systems::query::active_subject_engine;
 use nightshade::prelude::*;
 
 /// Spins the on-screen subject. The cube tumbles on two axes; the helmet turns

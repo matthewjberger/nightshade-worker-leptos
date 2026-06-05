@@ -31,10 +31,16 @@ pub struct SceneState {
     pub helmet_base_rotation: Option<nalgebra_glm::Quat>,
 }
 
-/// GPU pick request state. `message` carries a result ready to post back to the
-/// page (`Some(None)` is a miss).
+/// Outcome of a completed pick.
+pub enum PickOutcome {
+    Hit(PickResult),
+    Miss,
+}
+
+/// GPU pick state. `pending` is set while a request is in flight; `result`
+/// holds a finished outcome for the render loop to send to the page.
 #[derive(Default)]
 pub struct PickState {
     pub pending: bool,
-    pub message: Option<Option<PickResult>>,
+    pub result: Option<PickOutcome>,
 }
