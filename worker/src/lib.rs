@@ -49,6 +49,8 @@ struct CubeGame {
     pending_yaw: f32,
     pending_pitch: f32,
     pending_zoom: f32,
+    pick_pending: bool,
+    pick_message: Option<Option<PickResult>>,
 }
 
 impl CubeGame {
@@ -66,7 +68,54 @@ impl CubeGame {
             pending_yaw: 0.0,
             pending_pitch: 0.0,
             pending_zoom: 0.0,
+            pick_pending: false,
+            pick_message: None,
         }
+    }
+
+    fn apply_pick(&mut self, world: &mut World) {
+        if !self.pick_pending {
+            return;
+        }
+        let Some(result) = world.resources.gpu_picking.take_result() else {
+            return;
+        };
+        self.pick_pending = false;
+
+        if result.depth <= 0.0 {
+            self.pick_message = Some(None);
+            return;
+        }
+
+        let hit = result.world_position;
+        let root = if self.show_helmet {
+            self.helmet
+        } else {
+            self.cube
+        };
+        if let (Some(marker), Some(root)) = (self.marker, root) {
+            let local = world
+                .core
+                .get_global_transform(root)
+                .and_then(|global| global.0.try_inverse())
+                .map(|inverse| {
+                    let point = inverse * nalgebra_glm::vec4(hit.x, hit.y, hit.z, 1.0);
+                    Vec3::new(point.x / point.w, point.y / point.w, point.z / point.w)
+                })
+                .unwrap_or(hit);
+            if let Some(transform) = world.core.get_local_transform_mut(marker) {
+                transform.translation = local;
+            }
+            mark_local_transform_dirty(world, marker);
+        }
+
+        let name = if self.show_helmet { "Helmet" } else { "Cube" };
+        self.pick_message = Some(Some(PickResult {
+            name: name.to_string(),
+            x: hit.x,
+            y: hit.y,
+            z: hit.z,
+        }));
     }
 
     fn set_helmet_visible(&mut self, world: &mut World, enabled: bool) {
@@ -253,6 +302,8 @@ impl State for CubeGame {
         self.pending_zoom = 0.0;
 
         pan_orbit_camera_system(world);
+
+        self.apply_pick(world);
     }
 }
 
@@ -346,11 +397,14 @@ fn handle_message(scope: &DedicatedWorkerGlobalScope, app_slot: &AppSlot, event:
             }
         }
         ClientMessage::Pick { x, y } => {
-            let hit = app_slot
-                .borrow_mut()
-                .as_mut()
-                .and_then(|app| pick(app, x, y));
-            post(scope, &WorkerMessage::Picked { hit });
+            if let Some(app) = app_slot.borrow_mut().as_mut() {
+                app.world.resources.gpu_picking = GpuPicking::default();
+                app.world
+                    .resources
+                    .gpu_picking
+                    .request_pick(x.max(0.0) as u32, y.max(0.0) as u32);
+                app.game.pick_pending = true;
+            }
         }
         ClientMessage::SetHelmet { enabled } => {
             if let Some(app) = app_slot.borrow_mut().as_mut() {
@@ -408,6 +462,9 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
         if let Some(app) = app_slot.borrow_mut().as_mut() {
             tick_offscreen(&mut app.world, &mut app.game, &mut app.renderer);
             app.frames += 1.0;
+            if let Some(payload) = app.game.pick_message.take() {
+                post(&loop_scope, &WorkerMessage::Picked { hit: payload });
+            }
             if let Some(performance) = loop_scope.performance() {
                 let now = performance.now();
                 let mut last = last_push.borrow_mut();
@@ -425,53 +482,6 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
     if let Some(callback) = frame.borrow().as_ref() {
         let _ = scope.request_animation_frame(callback.as_ref().unchecked_ref());
     }
-}
-
-fn pick(app: &mut App, x: f32, y: f32) -> Option<PickResult> {
-    let results = pick_entities(&app.world, Vec2::new(x, y), PickingOptions::default());
-
-    let (root, result) = if app.game.show_helmet {
-        let helmet = app.game.helmet?;
-        let result = results
-            .into_iter()
-            .find(|hit| app.game.helmet_meshes.contains(&hit.entity))?;
-        (helmet, result)
-    } else {
-        let cube = app.game.cube?;
-        let result = results.into_iter().find(|hit| hit.entity == cube)?;
-        (cube, result)
-    };
-    let hit = result.world_position;
-
-    if let Some(marker) = app.game.marker {
-        let local = app
-            .world
-            .core
-            .get_global_transform(root)
-            .and_then(|global| global.0.try_inverse())
-            .map(|inverse| {
-                let point = inverse * nalgebra_glm::vec4(hit.x, hit.y, hit.z, 1.0);
-                Vec3::new(point.x / point.w, point.y / point.w, point.z / point.w)
-            })
-            .unwrap_or(hit);
-        if let Some(transform) = app.world.core.get_local_transform_mut(marker) {
-            transform.translation = local;
-        }
-        mark_local_transform_dirty(&mut app.world, marker);
-    }
-
-    let name = app
-        .world
-        .core
-        .get_name(result.entity)
-        .map(|name| name.0.clone())
-        .unwrap_or_else(|| "entity".to_string());
-    Some(PickResult {
-        name,
-        x: hit.x,
-        y: hit.y,
-        z: hit.z,
-    })
 }
 
 fn canvas_from(data: &JsValue) -> Option<OffscreenCanvas> {
