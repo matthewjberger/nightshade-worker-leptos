@@ -80,15 +80,19 @@ impl CubeGame {
                 .core
                 .set_visibility(cube, Visibility { visible: !enabled });
         }
-        if let Some(marker) = self.marker {
-            world
-                .core
-                .set_visibility(marker, Visibility { visible: !enabled });
-        }
         for &entity in &self.helmet_meshes {
             world
                 .core
                 .set_visibility(entity, Visibility { visible: enabled });
+        }
+
+        let root = if enabled { self.helmet } else { self.cube };
+        if let (Some(marker), Some(root)) = (self.marker, root) {
+            update_parent(world, marker, Some(Parent(Some(root))));
+            if let Some(transform) = world.core.get_local_transform_mut(marker) {
+                transform.translation = Vec3::new(0.0, 0.0, 0.0);
+            }
+            mark_local_transform_dirty(world, marker);
         }
     }
 
@@ -424,16 +428,26 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
 }
 
 fn pick(app: &mut App, x: f32, y: f32) -> Option<PickResult> {
-    let cube = app.game.cube?;
     let results = pick_entities(&app.world, Vec2::new(x, y), PickingOptions::default());
-    let result = results.into_iter().find(|hit| hit.entity == cube)?;
+
+    let (root, result) = if app.game.show_helmet {
+        let helmet = app.game.helmet?;
+        let result = results
+            .into_iter()
+            .find(|hit| app.game.helmet_meshes.contains(&hit.entity))?;
+        (helmet, result)
+    } else {
+        let cube = app.game.cube?;
+        let result = results.into_iter().find(|hit| hit.entity == cube)?;
+        (cube, result)
+    };
     let hit = result.world_position;
 
     if let Some(marker) = app.game.marker {
         let local = app
             .world
             .core
-            .get_global_transform(cube)
+            .get_global_transform(root)
             .and_then(|global| global.0.try_inverse())
             .map(|inverse| {
                 let point = inverse * nalgebra_glm::vec4(hit.x, hit.y, hit.z, 1.0);
@@ -449,7 +463,7 @@ fn pick(app: &mut App, x: f32, y: f32) -> Option<PickResult> {
     let name = app
         .world
         .core
-        .get_name(cube)
+        .get_name(result.entity)
         .map(|name| name.0.clone())
         .unwrap_or_else(|| "entity".to_string());
     Some(PickResult {
