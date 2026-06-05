@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use nightshade::prelude::*;
 use nightshade::render::wgpu::create_wgpu_renderer;
-use protocol::{AdapterInfo, ClientMessage, Stats, WorkerMessage};
+use protocol::{AdapterInfo, CANVAS_KEY, ClientMessage, MESSAGE_KEY, Stats, WorkerMessage};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
@@ -51,7 +51,7 @@ pub fn start() {
 
 fn handle_message(scope: &DedicatedWorkerGlobalScope, app_slot: &AppSlot, event: MessageEvent) {
     let data = event.data();
-    let Ok(payload) = js_sys::Reflect::get(&data, &JsValue::from_str("message")) else {
+    let Ok(payload) = js_sys::Reflect::get(&data, &JsValue::from_str(MESSAGE_KEY)) else {
         return;
     };
     let Ok(message) = serde_wasm_bindgen::from_value::<ClientMessage>(payload) else {
@@ -193,7 +193,7 @@ fn start_render_loop(scope: DedicatedWorkerGlobalScope, app_slot: AppSlot) {
 }
 
 fn canvas_from(data: &JsValue) -> Option<OffscreenCanvas> {
-    js_sys::Reflect::get(data, &JsValue::from_str("canvas"))
+    js_sys::Reflect::get(data, &JsValue::from_str(CANVAS_KEY))
         .ok()
         .and_then(|value| value.dyn_into::<OffscreenCanvas>().ok())
 }

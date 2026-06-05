@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use protocol::{ClientMessage, Stats, WorkerMessage};
+use protocol::{CANVAS_KEY, ClientMessage, MESSAGE_KEY, Stats, WorkerMessage};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -79,7 +79,7 @@ pub fn connect(offscreen: OffscreenCanvas, width: f32, height: f32, state: Worke
 pub fn send(bridge: &Bridge, message: &ClientMessage) {
     let envelope = js_sys::Object::new();
     let value = serde_wasm_bindgen::to_value(message).unwrap_or(JsValue::NULL);
-    let _ = js_sys::Reflect::set(&envelope, &JsValue::from_str("message"), &value);
+    let _ = js_sys::Reflect::set(&envelope, &JsValue::from_str(MESSAGE_KEY), &value);
     let _ = bridge.worker.post_message(&envelope);
 }
 
@@ -89,8 +89,8 @@ fn send_init(bridge: &Bridge, canvas: OffscreenCanvas, width: f32, height: f32) 
     let envelope = js_sys::Object::new();
     let value = serde_wasm_bindgen::to_value(&ClientMessage::Init { width, height })
         .unwrap_or(JsValue::NULL);
-    let _ = js_sys::Reflect::set(&envelope, &JsValue::from_str("message"), &value);
-    let _ = js_sys::Reflect::set(&envelope, &JsValue::from_str("canvas"), &canvas);
+    let _ = js_sys::Reflect::set(&envelope, &JsValue::from_str(MESSAGE_KEY), &value);
+    let _ = js_sys::Reflect::set(&envelope, &JsValue::from_str(CANVAS_KEY), &canvas);
     let transfer = js_sys::Array::of1(&canvas);
     let _ = bridge
         .worker
