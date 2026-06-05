@@ -39,6 +39,10 @@ Needs a browser with WebGPU and `OffscreenCanvas`-in-workers support (Chromium 1
 
 Pushing to `main` builds the worker and the Leptos bundle and publishes `dist/` to GitHub Pages through [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The page is served under the repository path, so the Trunk build sets `--public-url /nightshade-worker-leptos/`.
 
+## Credits
+
+The `DamagedHelmet` model (`worker/assets/DamagedHelmet.glb`) is from the [glTF Sample Models](https://github.com/KhronosGroup/glTF-Sample-Models) by theblueturtle_.
+
 ## License
 
-Dual-licensed under MIT or Apache-2.0, at your option.
+Dual-licensed under MIT or Apache-2.0, at your option. The bundled model is under its own license, see Credits.

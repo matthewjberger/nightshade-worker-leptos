@@ -254,6 +254,18 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    let helmet_slot = bridge_slot.clone();
+    let on_helmet = move |event: Event| {
+        let enabled = event
+            .target()
+            .and_then(|target| target.dyn_into::<HtmlInputElement>().ok())
+            .map(|input| input.checked())
+            .unwrap_or(false);
+        if let Some(bridge) = helmet_slot.borrow().as_ref() {
+            bridge.send(&ClientMessage::SetHelmet { enabled });
+        }
+    };
+
     let jam_slot = bridge_slot.clone();
     let on_jam = move |_| {
         let Some(bridge) = jam_slot.borrow().as_ref().cloned() else {
@@ -371,6 +383,11 @@ pub fn App() -> impl IntoView {
                     class="w-full h-[30px] bg-transparent border border-[#262b3c] rounded-md"
                     on:input=on_color
                 />
+            </label>
+
+            <label class="flex items-center gap-2 mb-3 cursor-pointer text-[#9aa0b4]">
+                <input type="checkbox" on:change=on_helmet />
+                <span>"Show damaged helmet"</span>
             </label>
 
             <button

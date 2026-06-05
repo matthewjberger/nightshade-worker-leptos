@@ -29,6 +29,7 @@ pub enum ClientMessage {
     Orbit { yaw: f32, pitch: f32 },
     Zoom { amount: f32 },
     Pick { x: f32, y: f32 },
+    SetHelmet { enabled: bool },
     StatsRequest { id: u32 },
 }
 

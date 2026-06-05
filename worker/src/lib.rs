@@ -15,6 +15,8 @@ const PITCH_LIMIT: f32 = 1.5;
 const MIN_RADIUS: f32 = 1.5;
 const MAX_RADIUS: f32 = 20.0;
 
+const HELMET_GLB: &[u8] = include_bytes!("../assets/DamagedHelmet.glb");
+
 type AppSlot = Rc<RefCell<Option<App>>>;
 type FrameLoop = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
@@ -37,6 +39,10 @@ impl App {
 struct CubeGame {
     cube: Option<Entity>,
     marker: Option<Entity>,
+    helmet: Option<Entity>,
+    helmet_meshes: Vec<Entity>,
+    helmet_base_rotation: Option<nalgebra_glm::Quat>,
+    show_helmet: bool,
     camera: Option<Entity>,
     spin: f32,
     speed: f32,
@@ -50,6 +56,10 @@ impl CubeGame {
         Self {
             cube: None,
             marker: None,
+            helmet: None,
+            helmet_meshes: Vec::new(),
+            helmet_base_rotation: None,
+            show_helmet: false,
             camera: None,
             spin: 0.0,
             speed: 1.0,
@@ -57,6 +67,60 @@ impl CubeGame {
             pending_pitch: 0.0,
             pending_zoom: 0.0,
         }
+    }
+
+    fn set_helmet_visible(&mut self, world: &mut World, enabled: bool) {
+        if enabled && self.helmet.is_none() {
+            self.load_helmet(world);
+        }
+        self.show_helmet = enabled;
+
+        if let Some(cube) = self.cube {
+            world
+                .core
+                .set_visibility(cube, Visibility { visible: !enabled });
+        }
+        if let Some(marker) = self.marker {
+            world
+                .core
+                .set_visibility(marker, Visibility { visible: !enabled });
+        }
+        for &entity in &self.helmet_meshes {
+            world
+                .core
+                .set_visibility(entity, Visibility { visible: enabled });
+        }
+    }
+
+    fn load_helmet(&mut self, world: &mut World) {
+        let mut result = match import_gltf_from_bytes(HELMET_GLB) {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::error!("failed to import helmet: {error}");
+                return;
+            }
+        };
+        nightshade::ecs::loading::queue_gltf_load(world, &mut result);
+
+        let Some(prefab) = result.prefabs.first() else {
+            return;
+        };
+        let root = nightshade::ecs::prefab::spawn_prefab(world, prefab, Vec3::new(0.0, 0.0, 0.0));
+        self.helmet_base_rotation = world
+            .core
+            .get_local_transform(root)
+            .map(|transform| transform.rotation);
+
+        let mut entities = nightshade::ecs::transform::queries::query_descendants(world, root);
+        entities.push(root);
+        for &entity in &entities {
+            world.core.add_components(entity, VISIBILITY);
+            world
+                .core
+                .set_visibility(entity, Visibility { visible: false });
+        }
+        self.helmet = Some(root);
+        self.helmet_meshes = entities;
     }
 }
 
@@ -108,6 +172,7 @@ impl State for CubeGame {
             Vec3::new(1.0, 1.0, 1.0),
         );
         world.core.set_material_ref(cube, MaterialRef::new("cube"));
+        world.core.add_components(cube, VISIBILITY);
         self.cube = Some(cube);
 
         let marker = spawn_mesh(
@@ -144,6 +209,7 @@ impl State for CubeGame {
             .core
             .set_material_ref(marker, MaterialRef::new("marker"));
         update_parent(world, marker, Some(Parent(Some(cube))));
+        world.core.add_components(marker, VISIBILITY);
         self.marker = Some(marker);
     }
 
@@ -151,7 +217,15 @@ impl State for CubeGame {
         let delta_time = world.resources.window.timing.delta_time;
         self.spin += self.speed * delta_time;
 
-        if let Some(cube) = self.cube {
+        if self.show_helmet {
+            if let (Some(helmet), Some(base)) = (self.helmet, self.helmet_base_rotation) {
+                if let Some(transform) = world.core.get_local_transform_mut(helmet) {
+                    transform.rotation =
+                        nalgebra_glm::quat_angle_axis(self.spin, &Vec3::new(0.0, 1.0, 0.0)) * base;
+                }
+                mark_local_transform_dirty(world, helmet);
+            }
+        } else if let Some(cube) = self.cube {
             if let Some(transform) = world.core.get_local_transform_mut(cube) {
                 transform.rotation =
                     nalgebra_glm::quat_angle_axis(self.spin, &Vec3::new(0.0, 1.0, 0.0))
@@ -272,6 +346,11 @@ fn handle_message(scope: &DedicatedWorkerGlobalScope, app_slot: &AppSlot, event:
                 .as_mut()
                 .and_then(|app| pick(app, x, y));
             post(scope, &WorkerMessage::Picked { hit });
+        }
+        ClientMessage::SetHelmet { enabled } => {
+            if let Some(app) = app_slot.borrow_mut().as_mut() {
+                app.game.set_helmet_visible(&mut app.world, enabled);
+            }
         }
         ClientMessage::StatsRequest { id } => {
             let stats = app_slot
